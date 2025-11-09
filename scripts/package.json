@@ -1,0 +1,12 @@
+{
+  "name": "minerva-scripts",
+  "version": "1.0.0",
+  "description": "Database seeding and utility scripts for MINERVA",
+  "scripts": {
+    "seed": "node seed-database.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1"
+  }
+}
