@@ -7,29 +7,131 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import SentinelAlert from '@/components/sentinel-alert'
 import HappinessWidget from '@/components/happiness-widget'
 import ComplaintVelocityWidget from '@/components/complaint-velocity-widget'
-import { AlertTriangle, TrendingUp, TrendingDown, Users } from 'lucide-react'
+import { AlertTriangle, TrendingUp, TrendingDown, Users, Loader2, Brain, Mic } from 'lucide-react'
 
 export default function DashboardPage() {
-  const [companyId] = useState('us') // Default to "us" company
-  const [prediction, setPrediction] = useState<any>(null)
+  const [companyId] = useState('us')
+  const [metrics, setMetrics] = useState<any>(null)
+  const [complaints, setComplaints] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [triggering, setTriggering] = useState(false)
+  const [aiAnalyzing, setAiAnalyzing] = useState(false)
+
+  // Fetch real metrics
+  useEffect(() => {
+    fetchMetrics()
+    const interval = setInterval(fetchMetrics, 30000) // Refresh every 30 seconds
+    return () => clearInterval(interval)
+  }, [companyId])
+
+  // Fetch complaints for categories
+  useEffect(() => {
+    fetchComplaints()
+  }, [companyId])
+
+  const fetchMetrics = async () => {
+    try {
+      // Get latest happiness metric
+      const { data: happinessData } = await supabase
+        .from('metrics_timeseries')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('metric_type', 'happiness')
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .single()
+
+      setMetrics(happinessData)
+      setLoading(false)
+    } catch (error) {
+      console.error('Error fetching metrics:', error)
+      setLoading(false)
+    }
+  }
+
+  const fetchComplaints = async () => {
+    try {
+      // Get complaints from last 24 hours
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
+      const { data } = await supabase
+        .from('complaints')
+        .select('*')
+        .eq('company_id', companyId)
+        .gte('timestamp', oneDayAgo)
+        .order('timestamp', { ascending: false})
+
+      setComplaints(data || [])
+    } catch (error) {
+      console.error('Error fetching complaints:', error)
+    }
+  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
   }
 
   const triggerDemoOutage = async () => {
+    setTriggering(true)
+    setAiAnalyzing(false)
+
     try {
       const response = await fetch('/api/demo/trigger-outage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company_id: companyId }),
       })
+
       const data = await response.json()
-      console.log('Demo outage triggered:', data)
+      console.log('✅ Demo outage triggered:', data)
+
+      // Show AI is analyzing
+      setTimeout(() => {
+        setAiAnalyzing(true)
+      }, 5000)
+
+      // Refresh metrics immediately
+      setTimeout(() => {
+        fetchMetrics()
+        fetchComplaints()
+      }, 2000)
+
+      setTimeout(() => {
+        fetchMetrics()
+        fetchComplaints()
+      }, 5000)
+
+      setTimeout(() => {
+        setTriggering(false)
+        setAiAnalyzing(false)
+        fetchMetrics()
+        fetchComplaints()
+      }, 15000)
+
     } catch (error) {
       console.error('Error triggering demo outage:', error)
+      setTriggering(false)
+      setAiAnalyzing(false)
     }
   }
+
+  // Calculate complaint categories
+  const complaintCategories = complaints.reduce((acc: any, complaint) => {
+    const category = complaint.category || 'other'
+    if (!acc[category]) {
+      acc[category] = { category, count: 0, complaints: [] }
+    }
+    acc[category].count++
+    acc[category].complaints.push(complaint)
+    return acc
+  }, {})
+
+  const topCategories = Object.values(complaintCategories)
+    .sort((a: any, b: any) => b.count - a.count)
+    .slice(0, 4)
+
+  const totalComplaints = complaints.length
+  const currentHappiness = metrics?.value ? Number(metrics.value).toFixed(1) : '...'
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -49,8 +151,16 @@ export default function DashboardPage() {
               variant="outline"
               size="sm"
               onClick={triggerDemoOutage}
+              disabled={triggering}
             >
-              Trigger Demo Outage
+              {triggering ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Triggering...
+                </>
+              ) : (
+                'Trigger Demo Outage'
+              )}
             </Button>
             <Button variant="outline" size="sm" onClick={handleLogout}>
               Logout
@@ -60,6 +170,25 @@ export default function DashboardPage() {
       </header>
 
       <main className="container mx-auto px-6 py-6 space-y-6">
+        {/* AI Status Indicator */}
+        {aiAnalyzing && (
+          <Card className="bg-purple-50 border-purple-200">
+            <CardContent className="py-4">
+              <div className="flex items-center space-x-3">
+                <Brain className="h-6 w-6 text-purple-600 animate-pulse" />
+                <div>
+                  <div className="font-semibold text-purple-900">
+                    🤖 Gemini AI Analyzing Anomaly...
+                  </div>
+                  <div className="text-sm text-purple-700">
+                    Running statistical analysis and generating prediction
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Sentinel Alert Banner */}
         <SentinelAlert companyId={companyId} />
 
@@ -72,25 +201,29 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">87.2%</div>
-              <div className="flex items-center text-sm text-green-600 mt-1">
-                <TrendingUp className="h-4 w-4 mr-1" />
-                <span>+2.1% from yesterday</span>
-              </div>
+              {loading ? (
+                <div className="text-3xl font-bold">Loading...</div>
+              ) : (
+                <>
+                  <div className="text-3xl font-bold">{currentHappiness}%</div>
+                  <div className="flex items-center text-sm text-muted-foreground mt-1">
+                    <span>Real-time from database</span>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Complaint Velocity
+                Total Complaints
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">+12%</div>
-              <div className="flex items-center text-sm text-orange-600 mt-1">
-                <AlertTriangle className="h-4 w-4 mr-1" />
-                <span>Last 10 minutes</span>
+              <div className="text-3xl font-bold">{totalComplaints}</div>
+              <div className="flex items-center text-sm text-muted-foreground mt-1">
+                <span>Last 24 hours</span>
               </div>
             </CardContent>
           </Card>
@@ -113,13 +246,17 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Active Issues
+                AI Features
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">3</div>
-              <div className="flex items-center text-sm text-muted-foreground mt-1">
-                <span>2 critical, 1 medium</span>
+              <div className="flex items-center space-x-2 text-sm">
+                <Brain className="h-5 w-5 text-purple-600" />
+                <span className="font-medium">Gemini 2.5</span>
+              </div>
+              <div className="flex items-center space-x-2 text-sm mt-2">
+                <Mic className="h-5 w-5 text-blue-600" />
+                <span className="font-medium">ElevenLabs</span>
               </div>
             </CardContent>
           </Card>
@@ -136,30 +273,41 @@ export default function DashboardPage() {
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle>Top Complaint Categories</CardTitle>
-              <CardDescription>Issues reported in the last 24 hours</CardDescription>
+              <CardDescription>Issues reported in the last 24 hours (Real Data from DB)</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {[
-                  { category: 'Login Issues', count: 45, percent: 45, color: 'bg-red-500' },
-                  { category: 'Slow Response', count: 23, percent: 23, color: 'bg-orange-500' },
-                  { category: 'Billing Errors', count: 18, percent: 18, color: 'bg-yellow-500' },
-                  { category: 'UI Bugs', count: 14, percent: 14, color: 'bg-blue-500' },
-                ].map((item) => (
-                  <div key={item.category}>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="font-medium">{item.category}</span>
-                      <span className="text-muted-foreground">{item.count} complaints</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className={`${item.color} h-2 rounded-full transition-all`}
-                        style={{ width: `${item.percent}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
+              {topCategories.length === 0 ? (
+                <div className="text-muted-foreground">No complaints in last 24 hours</div>
+              ) : (
+                <div className="space-y-4">
+                  {topCategories.map((item: any) => {
+                    const percent = totalComplaints > 0 ? (item.count / totalComplaints) * 100 : 0
+                    const colors: any = {
+                      auth: 'bg-red-500',
+                      billing: 'bg-orange-500',
+                      performance: 'bg-yellow-500',
+                      support: 'bg-blue-500',
+                      ui: 'bg-purple-500',
+                    }
+                    const color = colors[item.category] || 'bg-gray-500'
+
+                    return (
+                      <div key={item.category}>
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="font-medium capitalize">{item.category} Issues</span>
+                          <span className="text-muted-foreground">{item.count} complaints</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div
+                            className={`${color} h-2 rounded-full transition-all`}
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -170,21 +318,23 @@ export default function DashboardPage() {
             <CardContent>
               <div className="space-y-4 text-sm">
                 <div className="flex items-start space-x-2">
-                  <div className="min-w-[60px] text-muted-foreground">2 min ago</div>
-                  <div>Sentinel detected anomaly</div>
+                  <div className="min-w-[60px] text-muted-foreground">Live</div>
+                  <div>Real-time monitoring active</div>
                 </div>
-                <div className="flex items-start space-x-2">
-                  <div className="min-w-[60px] text-muted-foreground">15 min ago</div>
-                  <div>SWOT analysis updated</div>
-                </div>
-                <div className="flex items-start space-x-2">
-                  <div className="min-w-[60px] text-muted-foreground">1 hour ago</div>
-                  <div>Daily briefing ready</div>
-                </div>
-                <div className="flex items-start space-x-2">
-                  <div className="min-w-[60px] text-muted-foreground">2 hours ago</div>
-                  <div>Happiness index increased by 3%</div>
-                </div>
+                {aiAnalyzing && (
+                  <div className="flex items-start space-x-2">
+                    <Brain className="h-4 w-4 text-purple-600 mt-0.5 animate-pulse" />
+                    <div className="font-semibold text-purple-600">Gemini AI analyzing...</div>
+                  </div>
+                )}
+                {complaints.slice(0, 3).map((complaint, i) => (
+                  <div key={i} className="flex items-start space-x-2">
+                    <div className="min-w-[60px] text-muted-foreground">
+                      {new Date(complaint.timestamp).toLocaleTimeString()}
+                    </div>
+                    <div className="truncate">{complaint.text.substring(0, 50)}...</div>
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>

@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from elevenlabs import ElevenLabs, VoiceSettings
+from elevenlabs import generate, set_api_key
 from supabase import create_client, Client
 from dotenv import load_dotenv
 from datetime import datetime
@@ -20,8 +20,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ElevenLabs client
-eleven_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+# ElevenLabs API key
+set_api_key(os.getenv("ELEVENLABS_API_KEY"))
 
 # Supabase client
 supabase: Client = create_client(
@@ -50,19 +50,14 @@ async def text_to_speech(request: TextToSpeechRequest):
     """
     try:
         # Generate audio
-        audio = eleven_client.generate(
+        audio = generate(
             text=request.text,
             voice=request.voice,
-            model="eleven_turbo_v2_5",
-            voice_settings=VoiceSettings(
-                stability=0.6,
-                similarity_boost=0.8,
-                style=0.2
-            )
+            model="eleven_turbo_v2"
         )
 
-        # Convert generator to bytes
-        audio_bytes = b''.join(audio)
+        # Convert to bytes
+        audio_bytes = audio if isinstance(audio, bytes) else b''.join(audio)
 
         # Upload to Supabase Storage
         file_path = f"tts/tts-{datetime.now().isoformat()}.mp3"
@@ -92,19 +87,14 @@ async def generate_voice_alert(request: VoiceAlertRequest):
     """
     try:
         # Generate audio with urgent tone
-        audio = eleven_client.generate(
+        audio = generate(
             text=request.alert_text,
             voice="Rachel",
-            model="eleven_turbo_v2_5",
-            voice_settings=VoiceSettings(
-                stability=0.7,
-                similarity_boost=0.85,
-                style=0.3  # Slightly more expressive for alerts
-            )
+            model="eleven_turbo_v2"
         )
 
-        # Convert generator to bytes
-        audio_bytes = b''.join(audio)
+        # Convert to bytes
+        audio_bytes = audio if isinstance(audio, bytes) else b''.join(audio)
 
         # Upload to Supabase Storage
         file_path = f"alerts/alert-{request.prediction_id}-{datetime.now().isoformat()}.mp3"
@@ -170,19 +160,14 @@ async def generate_daily_briefing(company_id: str):
         """
 
         # Generate audio
-        audio = eleven_client.generate(
+        audio = generate(
             text=briefing_text,
             voice="Rachel",
-            model="eleven_turbo_v2_5",
-            voice_settings=VoiceSettings(
-                stability=0.6,
-                similarity_boost=0.8,
-                style=0.1
-            )
+            model="eleven_turbo_v2"
         )
 
-        # Convert generator to bytes
-        audio_bytes = b''.join(audio)
+        # Convert to bytes
+        audio_bytes = audio if isinstance(audio, bytes) else b''.join(audio)
 
         # Upload to Supabase Storage
         file_path = f"briefings/briefing-{company_id}-{datetime.now().date()}.mp3"
